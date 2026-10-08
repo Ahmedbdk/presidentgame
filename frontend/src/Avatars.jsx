@@ -1,17 +1,25 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import "./avatars.css";
 
 export const AVATAR_OPTIONS = Array.from({ length: 12 }, (_, i) => `c${i + 1}`);
+const avatarUrl = (avatar) => `/avatars/optimized/${avatar}.png`;
 
 export function PlayerAvatar({ player }) {
   return AVATAR_OPTIONS.includes(player.avatar) ? (
-    <img className="player-avatar-image" src={`/avatars/${player.avatar}.png`} alt="" draggable={false} />
+    <img className="player-avatar-image" src={avatarUrl(player.avatar)} alt="" draggable={false} />
   ) : (player.avatar || player.username?.[0]?.toUpperCase() || "?");
 }
 
 export function AvatarPicker({ value, onChange }) {
   const start = useRef(null);
   const index = Math.max(0, AVATAR_OPTIONS.indexOf(value));
+  useEffect(() => {
+    // Warm the adjacent choices before a swipe, including wraparound.
+    for (const offset of [-1, 1, 2]) {
+      const image = new Image();
+      image.src = avatarUrl(AVATAR_OPTIONS[(index + offset + AVATAR_OPTIONS.length) % AVATAR_OPTIONS.length]);
+    }
+  }, [index]);
   function move(direction) {
     onChange(AVATAR_OPTIONS[(index + direction + AVATAR_OPTIONS.length) % AVATAR_OPTIONS.length]);
   }
@@ -41,7 +49,7 @@ export function AvatarPicker({ value, onChange }) {
             const dy = event.clientY - previous.y;
             if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy)) move(dx < 0 ? 1 : -1);
           }}>
-          <img key={value} src={`/avatars/${value}.png`} alt={`Avatar ${index + 1}`} draggable={false} />
+          <img src={avatarUrl(value)} alt={`Avatar ${index + 1}`} draggable={false} />
         </div>
         <button type="button" className="avatar-arrow" aria-label="Next avatar" onClick={() => move(1)}>›</button>
       </div>
