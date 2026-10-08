@@ -2,6 +2,17 @@
 
 ## Free hosting: Cloudflare Pages and Render
 
+Current production URLs:
+
+- Frontend: https://presidentgame-9ko.pages.dev
+- Backend: https://president-game-backend.onrender.com
+- Cloudflare production build: `VITE_SOCKET_URL=https://president-game-backend.onrender.com`
+- Render runtime: `CORS_ALLOWED_ORIGINS=https://presidentgame-9ko.pages.dev`
+
+The deployed frontend and Socket.IO polling handshake with the production
+frontend Origin were verified on 2026-10-08. Browser multiplayer gameplay and
+browser reconnection still require the manual checks below.
+
 Use Node.js 24 for both platforms. Keep the backend as one instance because
 rooms and sessions are stored in that process's memory. No database is required.
 

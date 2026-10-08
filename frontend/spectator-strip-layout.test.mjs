@@ -6,7 +6,7 @@ const appSource = fs.readFileSync(new URL("./src/App.jsx", import.meta.url), "ut
 function cssRule(selector) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = appSource.match(
-    new RegExp(`${escapedSelector} \\{([\\s\\S]*?)\\n        \\}`),
+    new RegExp(`${escapedSelector} \\{([^}]*)\\}`),
   );
   assert.ok(match, `Expected ${selector} CSS rule`);
   return match[1];
@@ -45,7 +45,9 @@ assert.match(
   /aria-label=\{`\$\{spectatorPlayers\.length\} spectator/,
 );
 assert.match(appSource, /spectatorPlayers\.map\(\(player\) => \(/);
-assert.match(appSource, /player\.avatar \|\| player\.username\?\.\[0\]/);
+assert.match(appSource, /<PlayerAvatar player=\{player\} \/>/);
+const avatarSource = fs.readFileSync(new URL("./src/Avatars.jsx", import.meta.url), "utf8");
+assert.match(avatarSource, /player\.avatar \|\| player\.username\?\.\[0\]/);
 assert.match(appSource, /\{player\.username\}/);
 
 // The spectator strip remains in the status zone, before the flexible table;

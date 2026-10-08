@@ -28,6 +28,7 @@ import {
   HAND_CARD_WIDTH,
 } from "./responsiveHandLayout";
 import { reconcileHandOrder } from "./handOrder";
+import { AVATAR_OPTIONS, AvatarPicker, PlayerAvatar } from "./Avatars";
 
 const socket = SOCKET_URL ? io(SOCKET_URL) : io();
 
@@ -118,29 +119,6 @@ function sortHand(cards, direction) {
 
   return sorted;
 }
-
-// Selectable player avatars shown on the landing screen and worn at
-// the table. Deliberately a different symbol set from the playing
-// cards / rank icons used elsewhere, so avatars never get confused
-// with the game's own card/rank iconography.
-const AVATAR_OPTIONS = [
-  "🦁",
-  "🐯",
-  "🐻",
-  "🦊",
-  "🐼",
-  "🐨",
-  "🐵",
-  "🐸",
-  "🐺",
-  "🦉",
-  "🐙",
-  "🦄",
-  "🐧",
-  "🦋",
-  "🐬",
-  "🦖",
-];
 
 const DEFAULT_AVATAR = AVATAR_OPTIONS[0];
 
@@ -262,7 +240,7 @@ function PlayerSeat({ player, angle, isTurn, isMe, seatRef, fanRef }) {
 
       <div className={`seat-pill ${isTurn ? "active" : ""} ${isMe ? "seat-pill-me" : ""}`}>
         <span className="avatar-circle has-avatar">
-          {player.avatar || player.username?.[0]?.toUpperCase() || "?"}
+          <PlayerAvatar player={player} />
         </span>
         <span className="seat-name">
           {player.username}
@@ -1822,42 +1800,6 @@ function App() {
           text-transform: uppercase;
           letter-spacing: 2px;
           font-weight: 600;
-        }
-
-        .avatar-grid {
-          display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 8px;
-        }
-
-        .avatar-tile {
-          aspect-ratio: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 24px;
-          background: rgba(246, 241, 228, 0.08);
-          border: 2px solid rgba(246, 241, 228, 0.14);
-          border-radius: 12px;
-          cursor: pointer;
-          padding: 0;
-          transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-        }
-        .avatar-tile:hover {
-          border-color: var(--gold);
-          background: rgba(246, 241, 228, 0.16);
-          transform: translateY(-2px);
-        }
-        .avatar-tile.selected {
-          border-color: var(--gold-bright);
-          background: rgba(201, 162, 75, 0.28);
-          box-shadow: 0 0 0 3px rgba(232, 196, 104, 0.35), 0 6px 14px rgba(0,0,0,0.35);
-          transform: translateY(-2px) scale(1.05);
-        }
-
-        @media (max-width: 420px) {
-          .avatar-grid { grid-template-columns: repeat(5, 1fr); }
-          .avatar-tile { font-size: 21px; }
         }
 
         .btn {
@@ -3677,6 +3619,54 @@ function App() {
             justify-content: center;
           }
         }
+        /* Phone browser bars reduce the usable height, especially sideways.
+           Preserve a readable table and allow scrolling instead of clipping
+           controls or collapsing seats into the current play. */
+        @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+          .app-shell-game {
+            height: auto;
+            min-height: 100dvh;
+            overflow: visible;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            padding-left: max(8px, env(safe-area-inset-left));
+            padding-right: max(8px, env(safe-area-inset-right));
+          }
+          .game-screen { min-width: 0; }
+          .table-oval {
+            flex: 1 0 auto;
+            min-height: 340px;
+            margin-bottom: 12px;
+            border-width: 6px;
+          }
+          .table-center-zone {
+            flex-wrap: nowrap;
+            gap: 10px;
+            transform: translate(-50%, -50%) scale(0.65);
+          }
+          .hand-scroll-viewport { max-width: 100%; }
+          .bottom-zone { gap: 10px; }
+          .action-bar { flex-wrap: wrap; gap: 12px; padding-bottom: 6px; }
+          .action-btn, .sort-btn, .leave-btn { min-height: 44px; }
+          .action-btn { min-width: 80px; }
+          .table-status-badge { white-space: normal; text-align: center; }
+          .name-input { font-size: 16px; }
+        }
+        @media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+          .table-oval {
+            min-height: 300px;
+            --seat-scale-mq: 0.78;
+            border-radius: 38% / 30%;
+          }
+          .table-center-zone { transform: translate(-50%, -50%) scale(0.65); }
+          .hand-scroll-viewport,
+          .hand-scroll-viewport.scrollable { height: 155px; }
+          .hand-scroll-viewport.scrollable .hand-fan-wrap { height: 147px; }
+          .hand-scroll-viewport:not(.scrollable) .hand-fan-wrap {
+            height: 155px;
+            transform: scale(0.88);
+          }
+        }
+
       `}</style>
 
       {finishAnnouncement && (
@@ -3727,25 +3717,7 @@ function App() {
               onChange={(e) => setUsername(e.target.value)}
             />
 
-            <div className="avatar-picker">
-              <p className="avatar-picker-label">Choose your avatar</p>
-              <div className="avatar-grid">
-                {AVATAR_OPTIONS.map((avatar) => (
-                  <button
-                    key={avatar}
-                    type="button"
-                    className={`avatar-tile ${
-                      selectedAvatar === avatar ? "selected" : ""
-                    }`}
-                    onClick={() => setSelectedAvatar(avatar)}
-                    aria-label={`Choose avatar ${avatar}`}
-                    aria-pressed={selectedAvatar === avatar}
-                  >
-                    {avatar}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <AvatarPicker value={selectedAvatar} onChange={setSelectedAvatar} />
 
             <button
               className="btn btn-play"
@@ -3880,7 +3852,7 @@ function App() {
                 {spectatorPlayers.map((player) => (
                   <span key={player.id} className="spectator-chip">
                     <span className="avatar-circle small has-avatar">
-                      {player.avatar || player.username?.[0]?.toUpperCase() || "?"}
+                      <PlayerAvatar player={player} />
                     </span>
                     {player.username}
                     {player.id === socket.id && " (You)"}
@@ -4149,11 +4121,14 @@ function App() {
           <h3>Players:</h3>
 
           {players.map((player) => (
-            <p key={player.id} style={{ opacity: player.spectator ? 0.6 : 1 }}>
+            <p key={player.id} className="lobby-player" style={{ opacity: player.spectator ? 0.6 : 1 }}>
+              <span className="player-portrait lobby-portrait"><PlayerAvatar player={player} /></span>
+              <span>
               {player.username}
               {player.host && " 👑"}
               {player.id === socket.id && " (You)"}
               {player.spectator && " — Spectating (joins next round)"}
+              </span>
             </p>
           ))}
 
@@ -4200,6 +4175,7 @@ function App() {
                     {ROLE_ICON[player.rank || "Nothing"]}
                   </span>
                   <span className="podium-name">
+                    <span className="player-portrait podium-portrait"><PlayerAvatar player={player} /></span>
                     {player.username}
                     {player.id === socket.id && " (You)"}
                   </span>
@@ -4214,6 +4190,7 @@ function App() {
               <div className="asshole-result">
                 <span className="asshole-result-icon">💀</span>
                 <span className="asshole-result-name">
+                  <span className="player-portrait podium-portrait"><PlayerAvatar player={assholeResult} /></span>
                   {assholeResult.username}
                   {assholeResult.id === socket.id && " (You)"}
                 </span>
@@ -4236,6 +4213,7 @@ function App() {
                       {ROLE_ICON[player.rank || "Nothing"]}
                     </span>
                     <span className="results-name">
+                      <span className="player-portrait results-portrait"><PlayerAvatar player={player} /></span>
                       {ordinal(player.finishPosition)} — {player.username}
                       {player.id === socket.id && " (You)"}
                     </span>

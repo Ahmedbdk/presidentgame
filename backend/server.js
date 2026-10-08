@@ -190,6 +190,7 @@ const PHYSICAL_RANKS = new Set(ranks);
 const PHYSICAL_SUITS = new Set(suits);
 
 const VALID_AVATARS = new Set([
+  ...Array.from({ length: 12 }, (_, index) => `c${index + 1}`),
   "🦁",
   "🐯",
   "🐻",
