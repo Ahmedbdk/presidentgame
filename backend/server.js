@@ -2983,6 +2983,6 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(SERVER_PORT, () => {
+server.listen(SERVER_PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${SERVER_PORT}`);
 });

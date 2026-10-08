@@ -45,7 +45,7 @@ module.exports = { ROOM_PHASES, rooms };`;
       if (moduleName === "http") {
         return {
           createServer() {
-            return { listen(_port, callback) { callback?.(); } };
+            return { listen(_port, _host, callback) { callback?.(); } };
           },
         };
       }

@@ -18,6 +18,7 @@ module.exports = {
   let expressCorsOptions;
   let socketServerOptions;
   let listenedPort;
+  let listenedHost;
 
   class MockSocketServer {
     constructor(_server, options) {
@@ -53,8 +54,9 @@ module.exports = {
         return {
           createServer() {
             return {
-              listen(port, callback) {
+              listen(port, host, callback) {
                 listenedPort = port;
+                listenedHost = host;
                 callback?.();
               },
             };
@@ -73,6 +75,7 @@ module.exports = {
     expressCorsOptions,
     socketServerOptions,
     listenedPort,
+    listenedHost,
   };
 }
 
@@ -94,6 +97,7 @@ function checkOrigin(corsOptions, origin) {
   assert.strictEqual(config.DEFAULT_SERVER_PORT, 3001);
   assert.strictEqual(config.SERVER_PORT, 3001);
   assert.strictEqual(config.listenedPort, 3001);
+  assert.strictEqual(config.listenedHost, "0.0.0.0");
   assert.deepStrictEqual(
     Array.from(config.allowedCorsOrigins),
     ["http://localhost:5173"],
