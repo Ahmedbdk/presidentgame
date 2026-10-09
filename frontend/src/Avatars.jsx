@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import "./avatars.css";
 
-export const AVATAR_OPTIONS = Array.from({ length: 12 }, (_, i) => `c${i + 1}`);
+// Fixed shuffled order so browsing stays consistent across visits.
+export const AVATAR_OPTIONS = [
+  "c7", "c3", "c11", "c1", "c9", "c5",
+  "c12", "c4", "c8", "c2", "c10", "c6",
+];
 const avatarUrl = (avatar) => `/avatars/optimized/${avatar}.png`;
 
 export function PlayerAvatar({ player }) {
