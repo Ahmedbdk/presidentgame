@@ -185,7 +185,7 @@ function canDealEveryRoomMember(room) {
   );
 }
 
-const REQUESTABLE_RANKS = new Set([...ranks, "JOKER"]);
+const REQUESTABLE_RANKS = new Set(ranks);
 const PHYSICAL_RANKS = new Set(ranks);
 const PHYSICAL_SUITS = new Set(suits);
 

@@ -48,13 +48,8 @@ const RANKS = [
   "A",
 ];
 
-// Client-side only concept used for the President/Vice President card
-// request selection window - not a real card in the deck. Requesting
-// it simply flows through the exact same requestCard/exchange socket
-// events as any other rank; the server just won't find a match for it
-// in anyone's hand (handled by existing "responderHasCard" logic).
 const JOKER_RANK = "JOKER";
-const REQUEST_RANKS = [...RANKS, JOKER_RANK];
+const REQUEST_RANKS = RANKS;
 
 const DEBUG_RANK_BUTTONS = [
   { rank: "President", icon: "👑", label: "Become President" },
