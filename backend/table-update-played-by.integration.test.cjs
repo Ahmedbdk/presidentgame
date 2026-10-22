@@ -230,4 +230,92 @@ for (const playCount of [2, 3, 4]) {
   );
 }
 
+for (const rank of ["9", "A"]) {
+  for (const playCount of [1, 2, 3, 4]) {
+    const { room, playedCards } = makeRoom("A", playCount);
+    playedCards.forEach((card) => { card.rank = rank; });
+    const actor = room.find(({ id }) => id === "A");
+    const previousFinisher = room.find(({ id }) => id === "C");
+    actor.hand = [...playedCards];
+    previousFinisher.hand = [];
+    previousFinisher.finished = true;
+    previousFinisher.rank = "President";
+    previousFinisher.finishPosition = 1;
+    room.finishedPlayers = [previousFinisher];
+    room.push({
+      id: "SPECTATOR",
+      username: "Spectator",
+      avatar: null,
+      host: false,
+      hand: [],
+      finished: false,
+      rank: null,
+      finishPosition: null,
+      spectator: true,
+      connected: true,
+    });
+
+    const playerA = makeSocket("A");
+    const playerB = makeSocket("B");
+    connect(playerA);
+    connect(playerB);
+    play(playerA, playedCards);
+
+    const updates = tableUpdates();
+    assert.strictEqual(updates.length, 1);
+    const [update] = updates;
+    assert.strictEqual(update.payload.playedBy, "A");
+    assert.strictEqual(update.payload.nextPlayer, null);
+    assert.deepStrictEqual(
+      Array.from(update.payload.table, (card) => ({ ...card })),
+      playedCards,
+    );
+    assert.strictEqual(room.currentTurnId, null);
+    assert.strictEqual(room.phase, ROOM_PHASES.RESULTS);
+    assert.strictEqual(actor.hand.length, 0);
+
+    const privateHandUpdates = broadcasts.filter(
+      ({ event }) => event === "yourCards",
+    );
+    assert.strictEqual(privateHandUpdates.length, 1);
+    assert.strictEqual(privateHandUpdates[0].target, "A");
+    assert.strictEqual(privateHandUpdates[0].payload.length, 0);
+
+    const resultsUpdateIndex = broadcasts.findIndex(
+      ({ target, event, payload: updatePayload }) =>
+        target === "TEST" && event === "updateRoom" &&
+        updatePayload.phase === ROOM_PHASES.RESULTS,
+    );
+    const finishedIndex = broadcasts.findIndex(
+      ({ target, event }) => target === "TEST" && event === "gameFinished",
+    );
+    assert.ok(broadcasts.indexOf(update) < resultsUpdateIndex);
+    assert.ok(broadcasts.indexOf(privateHandUpdates[0]) < resultsUpdateIndex);
+    assert.ok(resultsUpdateIndex < finishedIndex);
+    const finishPayload = broadcasts[finishedIndex].payload;
+    assert.strictEqual(finishPayload.finalPlay, true);
+    assert.strictEqual(finishPayload.rankings.length, 3);
+    assert.deepStrictEqual(
+      Array.from(finishPayload.rankings, ({ finishPosition }) => finishPosition)
+        .sort((left, right) => left - right),
+      [1, 2, 3],
+    );
+    assert.strictEqual(actor.rank, rank === "A" ? "Asshole" : null);
+    assert.strictEqual(
+      room.find(({ id }) => id === "B").rank,
+      rank === "A" ? null : "Asshole",
+    );
+
+    const broadcastCount = broadcasts.length;
+    const remainingHand = [...room.find(({ id }) => id === "B").hand];
+    play(playerB, remainingHand);
+    pass(playerB);
+    play(playerA, playedCards);
+    assert.strictEqual(broadcasts.length, broadcastCount);
+    assert.strictEqual(room.phase, ROOM_PHASES.RESULTS);
+    assert.deepStrictEqual(room.find(({ id }) => id === "B").hand, remainingHand);
+    assert.ok(playerB.emitted.some(({ event }) => event === "errorMessage"));
+  }
+}
+
 console.log("tableUpdate playedBy integration tests passed");

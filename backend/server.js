@@ -717,10 +717,8 @@ function syncExistingRoomMembership(socket, membership) {
 // The guaranteed, automatic part of the exchange - no asking involved.
 // 4 players or fewer: Asshole gives their highest card to President, no give-back.
 // More than 4: Asshole <-> President swap 2 cards each way, Vice Asshole <-> Vice President swap 1 each way.
-function autoExchange(room, roles) {
+function autoExchange(roles, totalPlayers) {
   const { president, asshole, vicePresident, viceAsshole } = roles;
-
-  const totalPlayers = room.length;
 
   // Select every outgoing card from the hands as they existed before any
   // automatic transfer. This prevents an incoming card from immediately
@@ -935,7 +933,7 @@ function rankPendingWithdrawals(room) {
 // round to one (or zero) connected unfinished participants. Keep the terminal
 // ranking transition in one phase-guarded helper so either path closes the
 // same immutable round exactly once.
-function finishRoundIfReady(roomCode, room) {
+function finishRoundIfReady(roomCode, room, { playedBy = null } = {}) {
   if (!room || room.phase !== ROOM_PHASES.PLAYING) return false;
 
   const remainingPlayers = room.filter(
@@ -957,10 +955,21 @@ function finishRoundIfReady(roomCode, room) {
   room.phase = ROOM_PHASES.RESULTS;
   room.readyPlayers = new Set();
 
+  if (playedBy) {
+    room.currentTurnId = null;
+    io.to(roomCode).emit("tableUpdate", {
+      table: room.table,
+      nextPlayer: null,
+      playedBy,
+    });
+    io.to(playedBy).emit("yourCards", []);
+  }
+
   broadcastRoom(roomCode, room);
 
   io.to(roomCode).emit("gameFinished", {
     rankings: sanitizeFinishedPlayers(room.finishedPlayers),
+    ...(playedBy ? { finalPlay: true } : {}),
   });
 
   return true;
@@ -1302,6 +1311,8 @@ function startNewRound(roomCode) {
     return false;
   }
 
+  const previousRoundParticipantCount = room.roundParticipantCount;
+
   clearExchangeActionTimeout(room);
   room.phase = ROOM_PHASES.EXCHANGE;
 
@@ -1328,13 +1339,11 @@ function startNewRound(roomCode) {
 
   const prevRankings = room.finishedPlayers || [];
 
-  const totalPlayers = room.length;
-
   const resolvedRoles = resolvePreviousRoundExchangeRoles(
     roomCode,
     room,
     prevRankings,
-    totalPlayers > 4,
+    previousRoundParticipantCount > 4,
   );
 
   // A unique finalized role-holder who left before the new deal has no live
@@ -1343,9 +1352,13 @@ function startNewRound(roomCode) {
   const president = resolvedRoles.President.player;
   const asshole = resolvedRoles.Asshole.player;
   const vicePresident =
-    totalPlayers > 4 ? resolvedRoles["Vice President"].player : null;
+    previousRoundParticipantCount > 4
+      ? resolvedRoles["Vice President"].player
+      : null;
   const viceAsshole =
-    totalPlayers > 4 ? resolvedRoles["Vice Asshole"].player : null;
+    previousRoundParticipantCount > 4
+      ? resolvedRoles["Vice Asshole"].player
+      : null;
 
   // From the second round onward, the previous round's Asshole leads
   // the new round instead of whoever holds the 7 of hearts
@@ -1365,7 +1378,7 @@ function startNewRound(roomCode) {
     !!president && !!asshole && president.id !== asshole.id;
 
   const vaValid =
-    totalPlayers > 4 &&
+    previousRoundParticipantCount > 4 &&
     !!vicePresident &&
     !!viceAsshole &&
     vicePresident.id !== viceAsshole.id;
@@ -1376,12 +1389,15 @@ function startNewRound(roomCode) {
     return true;
   }
 
-  autoExchange(room, {
-    president: paValid ? president : null,
-    asshole: paValid ? asshole : null,
-    vicePresident: vaValid ? vicePresident : null,
-    viceAsshole: vaValid ? viceAsshole : null,
-  });
+  autoExchange(
+    {
+      president: paValid ? president : null,
+      asshole: paValid ? asshole : null,
+      vicePresident: vaValid ? vicePresident : null,
+      viceAsshole: vaValid ? viceAsshole : null,
+    },
+    previousRoundParticipantCount,
+  );
 
   // Send hands again now that the automatic swap has happened
   room.forEach((player) => {
@@ -1393,7 +1409,7 @@ function startNewRound(roomCode) {
   room.exchangeQueue = [];
 
   if (paValid) {
-    const requestCountPA = totalPlayers > 4 ? 2 : 1;
+    const requestCountPA = previousRoundParticipantCount > 4 ? 2 : 1;
 
     room.exchangeQueue.push(
       buildExchangeStage(president, asshole, requestCountPA),
@@ -2422,7 +2438,7 @@ io.on("connection", (socket) => {
 
       broadcastPlayerFinished(roomCode, player);
 
-      if (finishRoundIfReady(roomCode, room)) return;
+      if (finishRoundIfReady(roomCode, room, { playedBy: player.id })) return;
 
       // Sync a non-terminal finisher immediately across all clients.
       broadcastRoom(roomCode, room);
@@ -2904,6 +2920,7 @@ io.on("connection", (socket) => {
       p.rank = i < rolesForOthers.length ? rolesForOthers[i] : null;
     });
 
+    snapshotRoundPopulation(room);
     room.finishedPlayers = [...room];
     room.finishedPlayers.forEach((player, index) => {
       player.finishPosition = index + 1;

@@ -13,6 +13,8 @@ module.exports = {
   socketRoomCodes,
   playerSessions,
   disconnectTimers,
+  assignFinisherRank,
+  finishRoundIfReady,
 };`;
   let ioInstance;
   let nextTimerId = 1;
@@ -442,5 +444,160 @@ assert.strictEqual(playerSessions.has(guestToken), false);
 const tooLate = makeSocket("guest-too-late");
 connect(tooLate);
 assert.strictEqual(recover(tooLate, roomCode, guestToken).ok, false);
+
+{
+  const lifecycleHarness = loadServerHarness();
+  const participants = Array.from({ length: 5 }, (_value, index) =>
+    makeSocket(`exchange-player-${index + 1}`),
+  );
+  participants.forEach((participant) => lifecycleHarness.connect(participant));
+
+  const lifecycleHost = participants[0];
+  lifecycleHost.send(
+    "createRoom",
+    lifecycleHarness.makePayload({ username: "Exchange Host", avatar: null }),
+  );
+  const lifecycleRoomCode = lifecycleHost.last("roomCreated").payload.roomCode;
+
+  participants.slice(1).forEach((participant, index) => {
+    participant.send(
+      "joinRoom",
+      lifecycleHarness.makePayload({
+        roomCode: lifecycleRoomCode,
+        username: `Exchange Player ${index + 2}`,
+        avatar: null,
+      }),
+    );
+  });
+
+  lifecycleHost.send("startGame", lifecycleRoomCode);
+  const lifecycleRoom = lifecycleHarness.rooms[lifecycleRoomCode];
+  const originalParticipantIds = participants.map((participant) => participant.id);
+
+  function finishParticipant(playerId) {
+    const participant = lifecycleRoom.find((player) => player.id === playerId);
+    assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.PLAYING);
+    assert.strictEqual(lifecycleRoom.roundParticipantIds.includes(playerId), true);
+    participant.hand = [];
+    lifecycleHarness.assignFinisherRank(lifecycleRoom, participant, false);
+    lifecycleHarness.finishRoundIfReady(lifecycleRoomCode, lifecycleRoom);
+  }
+
+  function completeExchange() {
+    for (let requestIndex = 0; requestIndex < 3; requestIndex += 1) {
+      assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.EXCHANGE);
+      lifecycleHarness.runTimer(lifecycleRoom.exchangeActionTimer);
+    }
+    assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.PLAYING);
+  }
+
+  originalParticipantIds.slice(0, -1).forEach(finishParticipant);
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.RESULTS);
+  participants.forEach((participant) => {
+    participant.send("readyToPlayAgain", lifecycleRoomCode);
+  });
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.EXCHANGE);
+  assert.strictEqual(lifecycleRoom.exchangeQueue.length, 2);
+
+  const expectedExchangePairs = [
+    [participants[0].id, participants[4].id],
+    [participants[1].id, participants[3].id],
+  ];
+  const exchangePairs = () => Array.from(
+    lifecycleRoom.exchangeQueue,
+    (stage) => [stage.requesterId, stage.responderId],
+  );
+  assert.deepStrictEqual(exchangePairs(), expectedExchangePairs);
+
+  const newcomer = makeSocket("exchange-newcomer");
+  lifecycleHarness.connect(newcomer);
+  newcomer.send(
+    "joinRoom",
+    lifecycleHarness.makePayload({
+      roomCode: lifecycleRoomCode,
+      username: "Exchange Newcomer",
+      avatar: null,
+    }),
+  );
+  const newcomerSeat = lifecycleRoom.find((player) => player.id === newcomer.id);
+  assert.strictEqual(newcomerSeat.spectator, true);
+  assert.strictEqual(newcomerSeat.hand.length, 0);
+  assert.strictEqual(newcomerSeat.finished, false);
+  assert.strictEqual(newcomerSeat.rank, null);
+  assert.strictEqual(newcomerSeat.finishPosition == null, true);
+  assert.strictEqual(lifecycleRoom.roundParticipantCount, participants.length);
+  assert.deepStrictEqual(
+    Array.from(lifecycleRoom.roundParticipantIds),
+    originalParticipantIds,
+  );
+  assert.deepStrictEqual(exchangePairs(), expectedExchangePairs);
+  assert.strictEqual(
+    newcomer.last("gameFinished").payload.rankings.some(
+      (player) => player.id === newcomer.id,
+    ),
+    false,
+  );
+  assert(newcomer.last("exchangeInProgress"));
+  assert.strictEqual(newcomer.last("chooseCardRequest"), undefined);
+  assert.strictEqual(newcomer.last("cardRequested"), undefined);
+
+  newcomer.send("readyToPlayAgain", lifecycleRoomCode);
+  assert.strictEqual(lifecycleRoom.readyPlayers.size, 0);
+  completeExchange();
+  assert.strictEqual(newcomerSeat.spectator, true);
+  assert.strictEqual(newcomerSeat.hand.length, 0);
+  assert.strictEqual(lifecycleRoom.currentTurnId, participants[4].id);
+
+  originalParticipantIds.slice(0, -1).forEach(finishParticipant);
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.RESULTS);
+  assert.deepStrictEqual(
+    Array.from(lifecycleRoom.finishedPlayers, (player) => player.id),
+    originalParticipantIds,
+  );
+  assert.strictEqual(newcomerSeat.finished, false);
+  assert.strictEqual(newcomerSeat.rank, null);
+  assert.strictEqual(newcomerSeat.finishPosition == null, true);
+  const spectatorRoundResults = [...lifecycleHarness.broadcasts].reverse().find(
+    (entry) => entry.target === lifecycleRoomCode && entry.event === "gameFinished",
+  );
+  assert.strictEqual(spectatorRoundResults.payload.rankings.length, participants.length);
+  assert.strictEqual(
+    spectatorRoundResults.payload.rankings.some((player) => player.id === newcomer.id),
+    false,
+  );
+
+  participants.forEach((participant) => {
+    participant.send("readyToPlayAgain", lifecycleRoomCode);
+  });
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.RESULTS);
+  assert.strictEqual(lifecycleRoom.readyPlayers.size, participants.length);
+  assert.strictEqual(newcomerSeat.hand.length, 0);
+  const waitingForNewcomer = [...lifecycleHarness.broadcasts].reverse().find(
+    (entry) => entry.target === lifecycleRoomCode && entry.event === "readyUpdate",
+  );
+  assert.strictEqual(waitingForNewcomer.payload.count, participants.length);
+  assert.strictEqual(waitingForNewcomer.payload.total, participants.length + 1);
+
+  newcomer.send("readyToPlayAgain", lifecycleRoomCode);
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.EXCHANGE);
+  assert.strictEqual(newcomerSeat.spectator, false);
+  assert(newcomerSeat.hand.length > 0);
+  assert.strictEqual(lifecycleRoom.roundParticipantCount, participants.length + 1);
+  assert.strictEqual(lifecycleRoom.roundParticipantIds.includes(newcomer.id), true);
+  assert.strictEqual(Object.isFrozen(lifecycleRoom.roundParticipantIds), true);
+  assert.deepStrictEqual(exchangePairs(), expectedExchangePairs);
+
+  completeExchange();
+  finishParticipant(newcomer.id);
+  assert.strictEqual(newcomerSeat.rank, "President");
+  assert.strictEqual(newcomerSeat.finishPosition, 1);
+  originalParticipantIds.slice(0, -1).forEach(finishParticipant);
+  assert.strictEqual(lifecycleRoom.phase, ROOM_PHASES.RESULTS);
+  assert.strictEqual(lifecycleRoom.finishedPlayers.length, participants.length + 1);
+  assert.strictEqual(
+    lifecycleRoom.finishedPlayers.filter((player) => player.id === newcomer.id).length,
+    1,
+  );
+}
 
 console.log("session recovery integration tests passed");

@@ -196,9 +196,60 @@ function assertStage(stage, requesterId, responderId, totalRequests) {
 {
   const room = makeScenario(5, [4, 0, 1, 2, 3]);
   const updatedRoom = run(removeSeat(room, "p5"));
-  assert.strictEqual(updatedRoom.phase, ROOM_PHASES.PLAYING);
-  assert.strictEqual(updatedRoom.exchangeQueue.length, 0);
+  assert.strictEqual(updatedRoom.phase, ROOM_PHASES.EXCHANGE);
+  assert.strictEqual(updatedRoom.exchangeQueue.length, 1);
+  assertStage(updatedRoom.exchangeQueue[0], "p2", "p4", 1);
   assert.strictEqual(updatedRoom.previousAsshole, null);
+}
+
+for (const previousSize of [2, 3, 4]) {
+  for (const nextSize of [5, 6, 8]) {
+    const room = makeScenario(previousSize);
+
+    while (room.length < nextSize) {
+      const id = `late-${room.length + 1}`;
+      room.push({
+        id,
+        username: id,
+        hand: [],
+        finished: false,
+        rank: null,
+        finishPosition: null,
+        spectator: true,
+      });
+      room.readyPlayers.add(id);
+    }
+
+    const updatedRoom = run(room);
+
+    assert.strictEqual(updatedRoom.exchangeQueue.length, 1);
+    assertStage(updatedRoom.exchangeQueue[0], "p1", `p${previousSize}`, 1);
+    assert.strictEqual(updatedRoom.previousAsshole, `p${previousSize}`);
+    assert.strictEqual(updatedRoom.roundParticipantCount, nextSize);
+    assert.strictEqual(updatedRoom.roundParticipantIds.length, nextSize);
+    assert.strictEqual(updatedRoom.readyPlayers.size, 0);
+    assert.ok(updatedRoom.every((player) => !player.spectator && player.hand.length));
+    assert.ok(
+      updatedRoom.finishedPlayers.every((player) => !player.id.startsWith("late-")),
+    );
+    assert.strictEqual(startNewRound("TEST"), false);
+  }
+}
+
+for (const previousSize of [5, 6, 8]) {
+  let room = makeScenario(previousSize);
+
+  while (room.length > 4) {
+    const departed = room.find((player) => player.rank === null);
+    assert.ok(departed);
+    room = removeSeat(room, departed.id);
+  }
+
+  const updatedRoom = run(room);
+
+  assert.strictEqual(updatedRoom.exchangeQueue.length, 2);
+  assertStage(updatedRoom.exchangeQueue[0], "p1", `p${previousSize}`, 2);
+  assertStage(updatedRoom.exchangeQueue[1], "p2", `p${previousSize - 1}`, 1);
 }
 
 // Duplicate finalized roles are invalid, not first-match selections. Each

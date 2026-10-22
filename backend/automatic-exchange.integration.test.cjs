@@ -104,7 +104,7 @@ for (const size of [2, 3, 4]) {
 
   const before = roomCardIds(room);
 
-  assert.strictEqual(autoExchange(room, { president, asshole }), true);
+  assert.strictEqual(autoExchange({ president, asshole }, size), true);
   assert.deepStrictEqual(sortedCardIds(president.hand), ["A♠", "K♠", "Q♥"].sort());
   assert.deepStrictEqual(sortedCardIds(asshole.hand), ["10♥", "2♥"].sort());
   assertCardConservation(before, room);
@@ -138,7 +138,7 @@ for (const size of [5, 6]) {
   const before = roomCardIds(room);
 
   assert.strictEqual(
-    autoExchange(room, { president, asshole, vicePresident, viceAsshole }),
+    autoExchange({ president, asshole, vicePresident, viceAsshole }, size),
     true,
   );
 
@@ -149,6 +149,49 @@ for (const size of [5, 6]) {
   assert.deepStrictEqual(sortedCardIds(asshole.hand), ["2♥", "K♠", "Q♠"].sort());
   assert.deepStrictEqual(sortedCardIds(vicePresident.hand), ["3♣", "A♦"].sort());
   assert.deepStrictEqual(sortedCardIds(viceAsshole.hand), ["2♣", "K♦"].sort());
+  assertCardConservation(before, room);
+}
+
+for (const previousSize of [2, 3, 4]) {
+  for (const nextSize of [5, 6, 8]) {
+    const president = player("president", [card("2", "S"), card("3", "S")]);
+    const asshole = player("asshole", [card("K", "H"), card("Q", "H")]);
+    const room = [president, asshole];
+
+    while (room.length < nextSize) {
+      room.push(player(`late-${room.length}`, [card("5", `f${room.length}`)]));
+    }
+
+    const before = roomCardIds(room);
+    const untouchedHands = room.slice(2).map((member) => sortedCardIds(member.hand));
+
+    assert.strictEqual(autoExchange({ president, asshole }, previousSize), true);
+    assert.deepStrictEqual(sortedCardIds(president.hand), ["2S", "3S", "KH"]);
+    assert.deepStrictEqual(sortedCardIds(asshole.hand), ["QH"]);
+    assert.deepStrictEqual(
+      room.slice(2).map((member) => sortedCardIds(member.hand)),
+      untouchedHands,
+    );
+    assertCardConservation(before, room);
+  }
+}
+
+for (const previousSize of [5, 6, 8]) {
+  const president = player("president", [card("2", "S"), card("3", "S")]);
+  const asshole = player("asshole", [card("K", "H"), card("Q", "H")]);
+  const vicePresident = player("vice-president", [card("4", "D"), card("5", "D")]);
+  const viceAsshole = player("vice-asshole", [card("J", "C"), card("10", "C")]);
+  const room = [president, asshole, vicePresident, viceAsshole];
+  const before = roomCardIds(room);
+
+  assert.strictEqual(
+    autoExchange({ president, asshole, vicePresident, viceAsshole }, previousSize),
+    true,
+  );
+  assert.deepStrictEqual(sortedCardIds(president.hand), ["KH", "QH"]);
+  assert.deepStrictEqual(sortedCardIds(asshole.hand), ["2S", "3S"]);
+  assert.deepStrictEqual(sortedCardIds(vicePresident.hand), ["5D", "JC"]);
+  assert.deepStrictEqual(sortedCardIds(viceAsshole.hand), ["10C", "4D"]);
   assertCardConservation(before, room);
 }
 

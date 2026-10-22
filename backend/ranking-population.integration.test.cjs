@@ -236,4 +236,48 @@ function assertFrozenPopulation(room, expectedIds) {
   assert.strictEqual(rooms.TEST.roundParticipantIds.includes("p1"), false);
 }
 
+for (const size of [2, 3, 4, 5, 6, 7]) {
+  const room = makePlayingRoom(size);
+  const originalIds = room.map((player) => player.id);
+  const latePlayer = {
+    id: "late-player",
+    username: "Late Player",
+    host: false,
+    hand: [],
+    finished: false,
+    rank: null,
+    finishPosition: null,
+    spectator: true,
+  };
+
+  room.push(latePlayer);
+  assertFrozenPopulation(room, originalIds);
+
+  for (let position = 1; position < size; position += 1) {
+    finishPlayer(`p${position}`);
+  }
+
+  assert.strictEqual(room.phase, ROOM_PHASES.RESULTS);
+  assertCanonicalStandings(room, size);
+  assert.strictEqual(room.finishedPlayers.includes(latePlayer), false);
+  assert.strictEqual(latePlayer.rank, null);
+  assert.strictEqual(latePlayer.finishPosition, null);
+  assert.strictEqual(latePlayer.hand.length, 0);
+
+  room.readyPlayers = new Set(originalIds);
+  assert.strictEqual(startNewRound("TEST"), false);
+  assert.strictEqual(room.phase, ROOM_PHASES.RESULTS);
+  room.readyPlayers.add(latePlayer.id);
+  assert.strictEqual(startNewRound("TEST"), true);
+  assertFrozenPopulation(room, [...originalIds, latePlayer.id]);
+  assert.strictEqual(latePlayer.spectator, false);
+  assert.ok(latePlayer.hand.length > 0);
+  assert.strictEqual(latePlayer.rank, null);
+  assert.ok(
+    room.exchangeQueue.every(
+      (stage) => stage.requesterId !== latePlayer.id && stage.responderId !== latePlayer.id,
+    ),
+  );
+}
+
 console.log("Ranking population integration tests passed");

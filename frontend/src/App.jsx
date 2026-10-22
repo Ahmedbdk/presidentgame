@@ -28,9 +28,11 @@ import {
   HAND_CARD_WIDTH,
 } from "./responsiveHandLayout";
 import { reconcileHandOrder } from "./handOrder";
-import { AVATAR_OPTIONS, AvatarPicker, PlayerAvatar } from "./Avatars";
+import { AvatarPicker, PlayerAvatar } from "./Avatars";
+import { AVATAR_OPTIONS } from "./avatarOptions";
 
 const socket = SOCKET_URL ? io(SOCKET_URL) : io();
+const FINAL_PLAY_REVEAL_MS = 3000;
 
 const RANKS = [
   "2",
@@ -584,6 +586,7 @@ function App() {
   // way of normal gameplay otherwise.
   const [showDebugTools, setShowDebugTools] = useState(false);
   const copyTimeoutRef = useRef(null);
+  const resultsTimeoutRef = useRef(null);
   const finishAnnouncementTimeoutRef = useRef(null);
   const finishAnnouncementQueueRef = useRef([]);
   // Invalidates any card-animation callbacks that were scheduled before the
@@ -609,6 +612,10 @@ function App() {
     clearPile = false,
     settleHistory = false,
   } = {}) {
+    if (resultsTimeoutRef.current !== null) {
+      clearTimeout(resultsTimeoutRef.current);
+      resultsTimeoutRef.current = null;
+    }
     const revision = advanceTableActionRevision(tableActionRevisionRef);
 
     setFlyingCards([]);
@@ -944,12 +951,37 @@ function App() {
     });
 
     socket.on("gameFinished", (data) => {
-      invalidatePendingTableAnimations({ clearPile: true });
-      setTableCards([]);
+      if (resultsTimeoutRef.current !== null) {
+        clearTimeout(resultsTimeoutRef.current);
+        resultsTimeoutRef.current = null;
+      }
+
       setSelectedCards([]);
       setTurnPlayerId(null);
-      setFinalRankings(data.rankings);
       setMyTurn(false);
+
+      const showResults = () => {
+        invalidatePendingTableAnimations({ clearPile: true });
+        setTableCards([]);
+        setFinalRankings(data.rankings);
+      };
+
+      if (data.finalPlay) {
+        const roomUiEpoch = roomUiEpochRef.current;
+        const tableRevision = tableActionRevisionRef.current;
+        resultsTimeoutRef.current = setTimeout(() => {
+          resultsTimeoutRef.current = null;
+          if (
+            roomUiEpochRef.current !== roomUiEpoch ||
+            !isCurrentTableActionRevision(tableActionRevisionRef, tableRevision)
+          ) {
+            return;
+          }
+          showResults();
+        }, FINAL_PLAY_REVEAL_MS);
+      } else {
+        showResults();
+      }
     });
 
     const showFinishAnnouncement = (data) => {
@@ -1014,6 +1046,10 @@ function App() {
     return () => {
       roomUiEpochRef.current += 1;
       advanceTableActionRevision(tableActionRevisionRef);
+      if (resultsTimeoutRef.current !== null) {
+        clearTimeout(resultsTimeoutRef.current);
+        resultsTimeoutRef.current = null;
+      }
       if (finishAnnouncementTimeoutRef.current) {
         clearTimeout(finishAnnouncementTimeoutRef.current);
       }
@@ -1555,6 +1591,7 @@ function App() {
 
   const isLivePlay =
     roomPhase === "PLAYING" && gameStarted && !finalRankings;
+  const showingFinalPlay = roomPhase === "RESULTS" && !finalRankings;
 
   // The exchange phase (auto-swap + card requests) happens after
   // everyone has clicked Play Again but before the next round's table
@@ -1572,7 +1609,8 @@ function App() {
   // Table renders for ordinary live play AND for the exchange window -
   // the exchange modal/hand-return step both happen on top of the
   // real table, never on a separate screen.
-  const showTableView = gameStarted && (isLivePlay || inExchangePhase);
+  const showTableView =
+    gameStarted && (isLivePlay || showingFinalPlay || inExchangePhase);
 
   // The "give a card back" step is intentionally NOT a modal - the
   // requester picks straight from their normal hand fan.
@@ -3818,6 +3856,8 @@ function App() {
               <span className="status-dot" />
               {isReconnecting
                 ? "Reconnecting..."
+                : showingFinalPlay
+                ? "Round complete"
                 : inExchangePhase
                 ? returnPrompt
                   ? `Choose a card to give to ${returnPrompt.responderUsername}`
