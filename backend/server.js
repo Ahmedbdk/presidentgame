@@ -714,6 +714,40 @@ function syncExistingRoomMembership(socket, membership) {
   }
 }
 
+// Card details belong only to the two players in each completed exchange.
+// Build separate receipts so each player sees their own given/received cards.
+function notifyCardExchanges(transfers) {
+  const receipts = new Map();
+
+  transfers.forEach(({ from, to, cards }) => {
+    if (!receipts.has(from)) {
+      receipts.set(from, {
+        partnerUsername: to.username,
+        givenCards: [],
+        receivedCards: [],
+      });
+    }
+    if (!receipts.has(to)) {
+      receipts.set(to, {
+        partnerUsername: from.username,
+        givenCards: [],
+        receivedCards: [],
+      });
+    }
+
+    receipts.get(from).givenCards.push(
+      ...cards.map(({ rank, suit }) => ({ rank, suit })),
+    );
+    receipts.get(to).receivedCards.push(
+      ...cards.map(({ rank, suit }) => ({ rank, suit })),
+    );
+  });
+
+  receipts.forEach((receipt, player) => {
+    io.to(player.id).emit("cardExchangeCompleted", receipt);
+  });
+}
+
 // The guaranteed, automatic part of the exchange - no asking involved.
 // 4 players or fewer: Asshole gives their highest card to President, no give-back.
 // More than 4: Asshole <-> President swap 2 cards each way, Vice Asshole <-> Vice President swap 1 each way.
@@ -788,6 +822,8 @@ function autoExchange(roles, totalPlayers) {
     removeCardsFromHand(from.hand, cards);
     to.hand.push(...cards);
   });
+
+  notifyCardExchanges(transferPlan);
 
   return true;
 }
@@ -2825,6 +2861,11 @@ io.on("connection", (socket) => {
     io.to(requester.id).emit("yourCards", requester.hand);
 
     io.to(responder.id).emit("yourCards", responder.hand);
+
+    notifyCardExchanges([
+      { from: requester, to: responder, cards: [returnedCard] },
+      { from: responder, to: requester, cards: [transferredCard] },
+    ]);
 
     broadcastRoom(roomCode, room);
 

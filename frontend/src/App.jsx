@@ -103,6 +103,37 @@ function ordinal(position) {
   return `${value}th`;
 }
 
+function ExchangeNotices({ notices, onDismiss }) {
+  if (notices.length === 0) return null;
+
+  const cardNames = (cards) =>
+    cards.length
+      ? cards.map((card) => `${card.rank}${card.suit}`).join(", ")
+      : "None";
+
+  return (
+    <div className="exchange-notices" aria-live="polite" aria-relevant="additions">
+      {notices.map((notice) => (
+        <div className="exchange-notice" key={notice.id}>
+          <div className="exchange-notice-copy">
+            <strong>Exchange with {notice.partnerUsername}</strong>
+            <span>You gave: <b>{cardNames(notice.givenCards)}</b></span>
+            <span>You received: <b>{cardNames(notice.receivedCards)}</b></span>
+          </div>
+          <button
+            type="button"
+            className="exchange-notice-dismiss"
+            onClick={() => onDismiss(notice.id)}
+            aria-label={`Dismiss exchange with ${notice.partnerUsername}`}
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function sortHand(cards, direction) {
   const sorted = [...cards].sort((a, b) => {
     const diff = RANK_VALUES[a.rank] - RANK_VALUES[b.rank];
@@ -556,6 +587,8 @@ function App() {
   const [readyTotal, setReadyTotal] = useState(0);
 
   const [exchangeInfo, setExchangeInfo] = useState(null);
+  const [exchangeNotices, setExchangeNotices] = useState([]);
+  const exchangeNoticeIdRef = useRef(0);
   const [cardRequestPrompt, setCardRequestPrompt] = useState(null);
   const [cardOffer, setCardOffer] = useState(null);
   const [returnPrompt, setReturnPrompt] = useState(null);
@@ -670,6 +703,7 @@ function App() {
       setReadyCount(0);
       setReadyTotal(0);
       setExchangeInfo(null);
+      setExchangeNotices([]);
       setCardRequestPrompt(null);
       setCardOffer(null);
       setReturnPrompt(null);
@@ -782,6 +816,7 @@ function App() {
         setReadyCount(0);
         setReadyTotal(0);
         setExchangeInfo(null);
+        setExchangeNotices([]);
         setCardRequestPrompt(null);
         setCardOffer(null);
         setReturnPrompt(null);
@@ -826,6 +861,7 @@ function App() {
         setReadyCount(0);
         setReadyTotal(0);
         setExchangeInfo(null);
+        setExchangeNotices([]);
         setCardRequestPrompt(null);
         setCardOffer(null);
         setReturnPrompt(null);
@@ -951,6 +987,7 @@ function App() {
     });
 
     socket.on("gameFinished", (data) => {
+      setExchangeNotices([]);
       if (resultsTimeoutRef.current !== null) {
         clearTimeout(resultsTimeoutRef.current);
         resultsTimeoutRef.current = null;
@@ -1031,6 +1068,11 @@ function App() {
     socket.on("chooseCardToReturn", (data) => {
       setReturnPrompt(data);
       setPendingReturnCard(null);
+    });
+
+    socket.on("cardExchangeCompleted", (data) => {
+      const notice = { ...data, id: ++exchangeNoticeIdRef.current };
+      setExchangeNotices((previous) => [notice, ...previous]);
     });
 
     socket.on("exchangeStageCancelled", () => {
@@ -1534,6 +1576,7 @@ function App() {
     setReadyCount(0);
     setReadyTotal(0);
     setExchangeInfo(null);
+    setExchangeNotices([]);
     setCardRequestPrompt(null);
     setCardOffer(null);
     setReturnPrompt(null);
@@ -1615,6 +1658,12 @@ function App() {
   // The "give a card back" step is intentionally NOT a modal - the
   // requester picks straight from their normal hand fan.
   const inReturnStep = inExchangePhase && !!returnPrompt;
+  const showExchangePrompt =
+    inExchangePhase && !!(cardRequestPrompt || cardOffer);
+
+  const dismissExchangeNotice = (id) => {
+    setExchangeNotices((previous) => previous.filter((notice) => notice.id !== id));
+  };
 
   const sortedFinalRankings = useMemo(() => {
     if (!finalRankings) return [];
@@ -2291,8 +2340,10 @@ function App() {
           inset: 0;
           z-index: 600;
           display: flex;
-          align-items: flex-start;
-          justify-content: center;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-start;
+          gap: 12px;
           padding: 20px;
           padding-top: min(8vh, 60px);
           /* Bottom padding roughly reserves the hand's on-screen space so
@@ -2306,6 +2357,60 @@ function App() {
           backdrop-filter: blur(6px) brightness(0.75);
           -webkit-backdrop-filter: blur(6px) brightness(0.75);
           animation: overlayFadeIn 0.2s ease;
+        }
+
+        .exchange-notices {
+          flex: 0 0 auto;
+          width: 100%;
+          max-height: min(26vh, 220px);
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+
+        .exchange-overlay .exchange-notices {
+          max-width: 480px;
+          margin-bottom: 0;
+        }
+
+        .exchange-notice {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px;
+          background: var(--cream);
+          border: 1px solid var(--gold);
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+          font-size: 13px;
+        }
+
+        .exchange-notice-copy {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          min-width: 0;
+          overflow-wrap: anywhere;
+          line-height: 1.4;
+        }
+
+        .exchange-notice-copy > strong {
+          color: var(--felt);
+        }
+
+        .exchange-notice-dismiss {
+          flex: 0 0 auto;
+          padding: 6px;
+          border: 0;
+          background: transparent;
+          color: var(--felt);
+          font: inherit;
+          font-weight: 600;
+          text-decoration: underline;
+          cursor: pointer;
         }
 
         @keyframes overlayFadeIn {
@@ -3897,6 +4002,13 @@ function App() {
             )}
           </div>
 
+          {!showExchangePrompt && (
+            <ExchangeNotices
+              notices={exchangeNotices}
+              onDismiss={dismissExchangeNotice}
+            />
+          )}
+
           <div
             className="table-oval"
             style={{ "--seat-scale": seatScale(orderedSeatedPlayers.length) }}
@@ -4282,8 +4394,12 @@ function App() {
         </div>
       )}
 
-      {inExchangePhase && (cardRequestPrompt || cardOffer) && (
+      {showExchangePrompt && (
         <div className="exchange-overlay">
+          <ExchangeNotices
+            notices={exchangeNotices}
+            onDismiss={dismissExchangeNotice}
+          />
           <div
             className={`exchange-modal ${
               cardRequestPrompt && pendingRankSelection === JOKER_RANK

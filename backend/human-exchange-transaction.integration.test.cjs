@@ -271,6 +271,46 @@ function recover(context, socket, token) {
   assert.strictEqual(result.ok, true);
 }
 
+function exchangeNotices(context) {
+  return JSON.parse(JSON.stringify(context.broadcasts.filter(
+    (entry) => entry.event === "cardExchangeCompleted",
+  )));
+}
+
+function expectedNotice(target, partnerUsername, givenCard, receivedCard) {
+  return {
+    target,
+    event: "cardExchangeCompleted",
+    payload: {
+      partnerUsername,
+      givenCards: [givenCard],
+      receivedCards: [receivedCard],
+    },
+  };
+}
+
+function assertExchangeNotices(context, expected) {
+  const byTarget = (left, right) => left.target.localeCompare(right.target);
+  assert.deepStrictEqual(
+    exchangeNotices(context).sort(byTarget),
+    expected.sort(byTarget),
+    "completed exchanges must reveal exact cards only to the two participants",
+  );
+}
+
+function firstExchangeNotices(context, requesterId = "requester", responderId = "responder") {
+  return [
+    expectedNotice(
+      requesterId, context.room[1].username,
+      card("3", SPADES), card("K", HEARTS),
+    ),
+    expectedNotice(
+      responderId, context.room[0].username,
+      card("K", HEARTS), card("3", SPADES),
+    ),
+  ];
+}
+
 // 1/6/7/8/9. Normal commit is atomic, invalid and duplicate returns are
 // harmless, identities/counts are conserved, and the queue advances once.
 {
@@ -280,6 +320,7 @@ function recover(context, socket, token) {
   acceptRequestedKing(context);
 
   assertHandsEqual(context.room, beforeHands);
+  assertExchangeNotices(context, []);
   assert.strictEqual(context.firstStage.awaitingReturn, true);
   assert.strictEqual(
     identity(context.firstStage.pendingTransferCard),
@@ -296,6 +337,7 @@ function recover(context, socket, token) {
     context.makePayload({ roomCode: context.roomCode, card: card("A", SPADES) }),
   );
   assertHandsEqual(context.room, beforeHands);
+  assertExchangeNotices(context, []);
   assert.strictEqual(context.firstStage.awaitingReturn, true);
   assert.strictEqual(
     context.broadcasts.filter(
@@ -331,11 +373,48 @@ function recover(context, socket, token) {
   assert.strictEqual(context.firstStage.pendingTransferCard, null);
   assert.strictEqual(context.firstStage.requestsMade, 1);
   assert.strictEqual(context.room.pendingRequest, context.nextStage);
+  assertExchangeNotices(context, firstExchangeNotices(context));
 
   const committedHands = cloneHands(context.room);
   context.sockets[0].send("returnCardToAsshole", returnPayload);
   assertHandsEqual(context.room, committedHands);
   assert.strictEqual(context.firstStage.requestsMade, 1);
+  assertExchangeNotices(context, firstExchangeNotices(context));
+}
+
+// The vice pair receives only their own swap; the president/asshole pair
+// receives no extra notice when the independent second stage commits.
+{
+  const context = setupTransaction();
+  acceptRequestedKing(context);
+  context.sockets[0].send(
+    "returnCardToAsshole",
+    context.makePayload({ roomCode: context.roomCode, card: card("3", SPADES) }),
+  );
+  context.sockets[2].send(
+    "requestCardFromAsshole",
+    context.makePayload({ roomCode: context.roomCode, rank: "J" }),
+  );
+  context.sockets[3].send(
+    "assholeRespondToRequest",
+    context.makePayload({ roomCode: context.roomCode, give: true }),
+  );
+  assertExchangeNotices(context, firstExchangeNotices(context));
+  context.sockets[2].send(
+    "returnCardToAsshole",
+    context.makePayload({ roomCode: context.roomCode, card: card("8", SPADES) }),
+  );
+  assertExchangeNotices(context, [
+    ...firstExchangeNotices(context),
+    expectedNotice(
+      "vice", context.room[3].username,
+      card("8", SPADES), card("J", DIAMONDS),
+    ),
+    expectedNotice(
+      "vice-low", context.room[2].username,
+      card("J", DIAMONDS), card("8", SPADES),
+    ),
+  ]);
 }
 
 // 2/4. A requester disconnect keeps the untouched transaction reserved and a
@@ -364,6 +443,7 @@ function recover(context, socket, token) {
     roomCardIdentities(context.room),
     beforeHands.flat().map(identity).sort(),
   );
+  assertExchangeNotices(context, firstExchangeNotices(context, recoveredRequester.id));
 }
 
 // 3/4. A responder disconnect prevents commit while offline. Recovery keeps
@@ -388,6 +468,7 @@ function recover(context, socket, token) {
   );
   assertHandsEqual(context.room, beforeHands);
   assert.strictEqual(context.firstStage.awaitingReturn, true);
+  assertExchangeNotices(context, []);
   assert.strictEqual(
     context.broadcasts.filter(
       (entry) =>
@@ -413,6 +494,7 @@ function recover(context, socket, token) {
     }),
   );
   assert.strictEqual(context.firstStage.requestsMade, 1);
+  assertExchangeNotices(context, firstExchangeNotices(context, "requester", recoveredResponder.id));
 }
 
 // 5/8/9. Grace expiry cancels an uncommitted stage without moving either
@@ -438,6 +520,7 @@ function recover(context, socket, token) {
     liveRoom.reduce((total, player) => total + player.hand.length, 0),
     6,
   );
+  assertExchangeNotices(context, []);
 }
 
 // An explicit responder Leave uses the same cancellation path immediately:
@@ -455,6 +538,30 @@ function recover(context, socket, token) {
     liveRoom[0].hand.some((value) => identity(value) === `K:${HEARTS}`),
     false,
   );
+  assertExchangeNotices(context, []);
+}
+
+// Declines and uncommitted timeout rollbacks must never announce a swap.
+{
+  const context = setupTransaction();
+  context.sockets[0].send(
+    "requestCardFromAsshole",
+    context.makePayload({ roomCode: context.roomCode, rank: "K" }),
+  );
+  context.sockets[1].send(
+    "assholeRespondToRequest",
+    context.makePayload({ roomCode: context.roomCode, give: false }),
+  );
+  assertExchangeNotices(context, []);
+}
+
+{
+  const context = setupTransaction();
+  const beforeHands = cloneHands(context.room);
+  acceptRequestedKing(context);
+  context.runTimer(context.room.exchangeActionTimer);
+  assertHandsEqual(context.room, beforeHands);
+  assertExchangeNotices(context, []);
 }
 
 console.log("human exchange transaction integration tests passed");

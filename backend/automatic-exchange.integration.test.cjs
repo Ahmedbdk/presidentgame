@@ -7,11 +7,16 @@ function loadServerInternals() {
   const serverPath = path.join(__dirname, "server.js");
   const source = `${fs.readFileSync(serverPath, "utf8")}
 module.exports = { autoExchange, lowestCards };`;
+  const broadcasts = [];
 
   class MockSocketServer {
     on() {}
-    to() {
-      return { emit() {} };
+    to(target) {
+      return {
+        emit(event, payload) {
+          broadcasts.push({ target, event, payload });
+        },
+      };
     }
   }
 
@@ -42,17 +47,48 @@ module.exports = { autoExchange, lowestCards };`;
 
   vm.runInNewContext(source, context, { filename: serverPath });
 
-  return context.module.exports;
+  return { ...context.module.exports, broadcasts };
 }
 
-const { autoExchange, lowestCards } = loadServerInternals();
+const { autoExchange, lowestCards, broadcasts } = loadServerInternals();
 
 function card(rank, suit) {
   return { rank, suit };
 }
 
 function player(id, hand) {
-  return { id, hand };
+  return { id, username: id, hand };
+}
+
+function assertPrivateExchanges(expected) {
+  const notifications = broadcasts.filter(
+    (entry) => entry.event === "cardExchangeCompleted",
+  );
+  const normalize = (entries) => JSON.parse(JSON.stringify(entries))
+    .map((entry) => ({
+      ...entry,
+      payload: {
+        ...entry.payload,
+        givenCards: sortedCardIds(entry.payload.givenCards),
+        receivedCards: sortedCardIds(entry.payload.receivedCards),
+      },
+    }))
+    .sort((left, right) => left.target.localeCompare(right.target));
+
+  assert.deepStrictEqual(
+    normalize(notifications),
+    normalize(expected),
+    "only exchange participants should receive their own exact given/received cards",
+  );
+  broadcasts.length = 0;
+}
+
+function exchangeNotice(target, partnerUsername, givenCards, receivedCards) {
+  return {
+    target,
+    event: "cardExchangeCompleted",
+    payload: { partnerUsername, givenCards, receivedCards },
+  };
 }
 
 function cardId(value) {
@@ -105,6 +141,10 @@ for (const size of [2, 3, 4]) {
   const before = roomCardIds(room);
 
   assert.strictEqual(autoExchange({ president, asshole }, size), true);
+  assertPrivateExchanges([
+    exchangeNotice("president", "asshole", [], [card("Q", "\u2665")]),
+    exchangeNotice("asshole", "president", [card("Q", "\u2665")], []),
+  ]);
   assert.deepStrictEqual(sortedCardIds(president.hand), ["A♠", "K♠", "Q♥"].sort());
   assert.deepStrictEqual(sortedCardIds(asshole.hand), ["10♥", "2♥"].sort());
   assertCardConservation(before, room);
@@ -141,6 +181,26 @@ for (const size of [5, 6]) {
     autoExchange({ president, asshole, vicePresident, viceAsshole }, size),
     true,
   );
+  assertPrivateExchanges([
+    exchangeNotice(
+      "president", "asshole",
+      [card("Q", "\u2660"), card("K", "\u2660")],
+      [card("4", "\u2665"), card("3", "\u2665")],
+    ),
+    exchangeNotice(
+      "asshole", "president",
+      [card("4", "\u2665"), card("3", "\u2665")],
+      [card("Q", "\u2660"), card("K", "\u2660")],
+    ),
+    exchangeNotice(
+      "vice-president", "vice-asshole",
+      [card("K", "\u2666")], [card("3", "\u2663")],
+    ),
+    exchangeNotice(
+      "vice-asshole", "vice-president",
+      [card("3", "\u2663")], [card("K", "\u2666")],
+    ),
+  ]);
 
   // The incoming 4/3 and 3 are lower than the receivers' original cards.
   // They must remain with the receivers because all outgoing selections were
@@ -166,6 +226,10 @@ for (const previousSize of [2, 3, 4]) {
     const untouchedHands = room.slice(2).map((member) => sortedCardIds(member.hand));
 
     assert.strictEqual(autoExchange({ president, asshole }, previousSize), true);
+    assertPrivateExchanges([
+      exchangeNotice("president", "asshole", [], [card("K", "H")]),
+      exchangeNotice("asshole", "president", [card("K", "H")], []),
+    ]);
     assert.deepStrictEqual(sortedCardIds(president.hand), ["2S", "3S", "KH"]);
     assert.deepStrictEqual(sortedCardIds(asshole.hand), ["QH"]);
     assert.deepStrictEqual(
@@ -188,6 +252,20 @@ for (const previousSize of [5, 6, 8]) {
     autoExchange({ president, asshole, vicePresident, viceAsshole }, previousSize),
     true,
   );
+  assertPrivateExchanges([
+    exchangeNotice(
+      "president", "asshole",
+      [card("2", "S"), card("3", "S")],
+      [card("K", "H"), card("Q", "H")],
+    ),
+    exchangeNotice(
+      "asshole", "president",
+      [card("K", "H"), card("Q", "H")],
+      [card("2", "S"), card("3", "S")],
+    ),
+    exchangeNotice("vice-president", "vice-asshole", [card("4", "D")], [card("J", "C")]),
+    exchangeNotice("vice-asshole", "vice-president", [card("J", "C")], [card("4", "D")]),
+  ]);
   assert.deepStrictEqual(sortedCardIds(president.hand), ["KH", "QH"]);
   assert.deepStrictEqual(sortedCardIds(asshole.hand), ["2S", "3S"]);
   assert.deepStrictEqual(sortedCardIds(vicePresident.hand), ["5D", "JC"]);

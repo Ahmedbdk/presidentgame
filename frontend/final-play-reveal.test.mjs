@@ -61,6 +61,7 @@ function makeHarness() {
     myTurn: true,
     finalRankings: null,
     gameStarted: true,
+    exchangeNotices: [],
   };
   const context = {
     HAND_CARD_WIDTH,
@@ -78,6 +79,7 @@ function makeHarness() {
     manualHandOrderRef: { current: false },
     finishAnnouncementQueueRef: { current: [] },
     finishAnnouncementTimeoutRef: { current: null },
+    exchangeNoticeIdRef: { current: 0 },
     copyTimeoutRef: { current: null },
     pileRef: { current: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 140 }) } },
     cardRefs: { current: {} },
@@ -121,6 +123,7 @@ function makeHarness() {
     socketHandler("tableUpdate"),
     socketHandler("gameFinished"),
     socketHandler("gameStarted"),
+    socketHandler("cardExchangeCompleted"),
     cleanupSource,
     "animationHandlersRef.current.play = triggerPlayAnimation;",
     "globalThis.unmount = unmount;",
@@ -266,5 +269,37 @@ assert.match(roomUpdate, /if \(!data\.roomCode\) \{[\s\S]*?invalidatePendingTabl
 assert.match(roomUpdate, /if \(data\.phase === "WAITING"\) \{[\s\S]*?invalidatePendingTableAnimations\(\{ clearPile: true \}\)/);
 assert.match(appSource, /const resetAfterFailedRecovery = \(\) => \{[\s\S]*?invalidatePendingTableAnimations\(\{ clearPile: true \}\)/);
 assert.match(socketHandler("exchangeInProgress"), /invalidatePendingTableAnimations\(\{ clearPile: true \}\)/);
+
+{
+  const harness = makeHarness();
+  const automaticExchange = {
+    partnerUsername: "Asshole",
+    givenCards: [{ rank: "2", suit: "clubs" }],
+    receivedCards: [{ rank: "A", suit: "hearts" }],
+  };
+  const requestedExchange = {
+    partnerUsername: "Asshole",
+    givenCards: [{ rank: "3", suit: "clubs" }],
+    receivedCards: [{ rank: "K", suit: "hearts" }],
+  };
+
+  harness.emit("cardExchangeCompleted", automaticExchange);
+  harness.emit("cardExchangeCompleted", requestedExchange);
+  assert.equal(harness.state.exchangeNotices.length, 2);
+  assert.strictEqual(harness.state.exchangeNotices[0].givenCards, requestedExchange.givenCards);
+  assert.strictEqual(harness.state.exchangeNotices[1].receivedCards, automaticExchange.receivedCards);
+  assert.notEqual(harness.state.exchangeNotices[0].id, harness.state.exchangeNotices[1].id);
+
+  // The server starts play immediately after the final swap. Its receipt
+  // must remain visible long enough for both participants to read it.
+  harness.emit("gameStarted");
+  assert.equal(harness.state.exchangeNotices.length, 2);
+  harness.emit("gameFinished", { rankings });
+  assert.equal(harness.state.exchangeNotices.length, 0);
+
+  harness.emit("cardExchangeCompleted", automaticExchange);
+  harness.context.leaveRoom();
+  assert.equal(harness.state.exchangeNotices.length, 0);
+}
 
 console.log("Final-play reveal tests passed.");
